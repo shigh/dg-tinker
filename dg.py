@@ -17,6 +17,7 @@ class Mesh(object):
     def __init__(self, K, N, L=1.0, periodic=False):
 
         self.K, self.N, self.L = K, N, L
+        self.periodic = periodic
 
         semh = SEMhat(N)
         n_dofs = K*(N+1)
@@ -89,6 +90,83 @@ class Mesh(object):
         Binv = sps.kron(sps.eye(K), Minv).tocsr()
         self.Binv = Binv
         self.Vinv, self.V = Vinv, V
+
+class LimiterMUSCL(object):
+
+    def __init__(self, mesh):
+
+        self.mesh = mesh
+        N = mesh.N
+
+        # elem midpoints
+        x0 = (mesh.xq[:,0]+mesh.xq[:,-1])/2.0
+        # elem widths (assuming uniform)
+        h  = (mesh.xq[:,-1]-mesh.xq[:,0])[0]
+        self.x0, self.h = x0, h
+
+        # Remove scale factors built into V
+        # (b.c. of the def used in nodal-dg)
+        nv  = np.arange(N+1)
+        gam = 2.0/(2.0*nv+1)
+        G = sps.dia_matrix((1.0/np.sqrt(gam),0),
+                          shape=mesh.Vinv.shape)
+        G = G.dot(mesh.Vinv)
+        self.G = G
+
+    def slope_limit(self, U):
+
+        x0, h, G = self.x0, self.h, self.G
+        mesh = self.mesh
+        N = mesh.N
+        periodic = mesh.periodic
+
+        if not periodic:
+            u = U
+        else:
+            u = np.zeros(U.shape[0]+2*(N+1))
+            u[(N+1):-(N+1)] = U
+
+        us = u.reshape((-1,N+1)).T
+        if periodic:
+            us[:,0] = us[:,-2]
+            us[:,-1] = us[:,1]
+
+        avg, slope = G.dot(us)[[0,1]]
+
+        # The two comes from the domain of Legendre polys
+        slope *= 2.0/h
+        u = u.reshape((-1,N+1))
+
+        h2 = h/2.0
+        h2 = h
+        m = minmod(slope[1:-1],
+                   (avg[2:]-avg[1:-1])/h2,
+                   (avg[1:-1]-avg[:-2])/h2)
+
+        # xq has shape (n_elem, n_dof_per_elem)
+        # This is why the rest of the arrays need to use newaxis
+        xq = mesh.xq
+        if periodic:
+            u[1:-1] = avg[1:-1,newaxis]+(xq-x0[:,newaxis])*m[:,newaxis]
+        else:
+            u[1:-1] = avg[1:-1,newaxis]+(xq-x0[:,newaxis])[1:-1]*m[:,newaxis]
+
+        if periodic:
+            U[:] = u[1:-1].reshape(U.shape)
+
+    def apply_limiter(self, u):
+        self.slope_limit(u[:,0])
+        self.slope_limit(u[:,1])
+        self.slope_limit(u[:,2])
+
+class LimiterNULL(object):
+
+    def __init__(self, mesh):
+        pass
+
+    def apply_limiter(self, u):
+        pass
+
 
 class EqnSetEuler(object):
 
