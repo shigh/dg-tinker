@@ -89,3 +89,31 @@ class Mesh(object):
         Binv = sps.kron(sps.eye(K), Minv).tocsr()
         self.Binv = Binv
         self.Vinv, self.V = Vinv, V
+
+class EqnSetEuler(object):
+
+    def __init__(self, gamma=7.0/5.0):
+        self.gamma = gamma
+
+    def calc_flux(self, u):
+
+        gamma = self.gamma
+        f = np.zeros_like(u)
+        p = (gamma-1)*(u[:,2]-.5*u[:,1]**2/u[:,0])
+        f[:,0] = u[:,1]
+        f[:,1] = u[:,1]**2/u[:,0]+p
+        f[:,2] = (u[:,2]+p)*u[:,1]/u[:,0]
+
+        return f
+
+    def calc_eig(self, u):
+        p = self.calc_p(u)
+        gamma = self.gamma
+        eig  = np.abs(u[:,1]/u[:,0])
+        eig += np.sqrt(gamma*p/u[:,0])
+        return eig
+
+    def calc_p(self, u):
+        gamma = self.gamma
+        p = (gamma-1)*(u[:,2]-.5*u[:,1]**2/u[:,0])
+        return p
